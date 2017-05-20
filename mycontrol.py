@@ -15,9 +15,10 @@ class Controller(object):
     Majestic class which presents controller, thanks
     duck-typing and disgusting POX architecture
     """
-    def __init__(self, connection):
+    def __init__(self, connection, tenant_matcher):
         # Keep track of the connection to the switch
         self.connection = connection
+        self.tenant_matcher = tenant_matcher
 
         # This binds listeners _handle_EventType to EventType
         connection.addListeners(self)
@@ -63,6 +64,11 @@ class Controller(object):
         self.mac_to_port[src] = port
         log.debug("Wrote mac_to_port[%s] = %s" % (str(src), str(port),))
 
+        if not self.tenant_matcher.is_same_tenant(src, dst):
+            log.warning("Attempt to access violation (different tenants)! "
+                        "%s -> %s" % (src, dst,))
+            return
+
         if dst.is_multicast or dst not in self.mac_to_port:
             # Flood the packet out everything but the input port
             log.debug("(!) Flooding the packet from %s:%i" % (src, port,))
@@ -100,12 +106,34 @@ class Controller(object):
         self.connection.send(msg)
 
 
+class TenantMatcher(object):
+    def __init__(self, cfg_filename):
+        self.mac_to_tenant = dict()
+
+        with open(cfg_filename) as f:
+            for idx, line in enumerate(f):
+                MACs = line[:-1].split(',')
+                for MAC in MACs:
+                    self.mac_to_tenant[MAC] = idx
+
+    def is_same_tenant(self, MAC1, MAC2):
+        broadcast = of.EthAddr('ff:ff:ff:ff:ff:ff')
+        if MAC1 == broadcast or MAC2 == broadcast:
+            return True
+
+        tenant1 = self.mac_to_tenant.get(str(MAC1), -1)
+        tenant2 = self.mac_to_tenant.get(str(MAC2), -1)
+        return tenant1 == tenant2
+
+
 def launch():
     """
         Starts the component
     """
+    # As it was stated in the assignment .cfg is hardcoded
+    tenant_matcher = TenantMatcher('/home/mininet/tenants.cfg')
 
     def handle_connection_up(event):
         log.debug("Controlling %s" % (event.connection,))
-        Controller(event.connection, )
+        Controller(event.connection, tenant_matcher)
     core.openflow.addListenerByName("ConnectionUp", handle_connection_up)
