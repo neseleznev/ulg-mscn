@@ -6,6 +6,8 @@ This component presents controller for the Task 2 in MSCN ULg course.
 
 from pox.core import core
 import pox.openflow.libopenflow_01 as of
+from pox.lib.util import dpidToStr
+from pox.openflow.of_json import flow_stats_to_list
 
 log = core.getLogger()
 
@@ -26,6 +28,58 @@ class Controller(object):
         # Use this table to keep track of which ethernet address is on
         # which switch port (keys are MACs, values are ports).
         self.mac_to_port = {}
+
+        # {str(connection.dpid): stats}
+        self.statistics = dict()
+
+        from pox.lib.recoco import Timer
+        # timer set to execute send_stats_request every 5 seconds
+        Timer(5, self.send_stats_request, recurring=True)
+        # timer set to execute log_stats every minute
+        Timer(60, self.log_stats, recurring=True)
+
+        # send first request as soon as possible
+        self.send_stats_request()
+
+    @staticmethod
+    def send_stats_request():
+        """
+        Handler for timer function (periodic task) that sends the requests to
+        all the switches connected to the controller.
+        """
+        for c in core.openflow.connections:
+            c.send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+        log.debug("Sent %i port stats request(s)",
+                  len(core.openflow.connections))
+
+    @staticmethod
+    def log_stats():
+        """
+        Handler for timer function (periodic task) that logs statistics
+        about switches and hosts:
+            * for each switch: the number of dropped packets;
+            * for each host: the total number of received and transmitted
+              bytes, and the reception and emission bandwidth during
+              the last minute.
+        """
+        log.info("Statistics about switches and hosts:")
+        # TODO May 20
+
+    def _handle_PortStatsReceived(self, event):
+        """
+        Port statistics handler
+        :param event: event.stats = statistics received in JSON format
+        """
+        # dpid = dpidToStr(event.connection.dpid)
+        dpid = event.connection.dpid
+        stats = flow_stats_to_list(event.stats)
+        log.debug("PortStatsReceived from %s", dpid)
+        self.statistics[dpid] = stats
+        # log.info("s%s DROP %d" % (dpid, stats[-1]['tx_dropped'] + stats[-1]['rx_dropped']))
+        # for stat in stats[:-1]:
+        #     log.info("h%s: RX_BYTES %s, TX_BYTES %s, RX_BW 1.2 kbps, TX_BW 384 kbps" % (
+        #         stat['port_no'], stat['rx_bytes'], stat['tx_bytes']
+        #     ))
 
     def _handle_PacketIn(self, event):
         """

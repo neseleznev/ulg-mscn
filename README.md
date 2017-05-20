@@ -40,6 +40,14 @@ In fact, there are only few lines of code were changed:
 Code obtained after Openflow tutorial (completed by ourselves as well)
 was used as a base to that task.
 
+Periodic tasks scheduling was made using `pox.lib.recoco.Timer` object,
+as it recommended by the authors of POX.
+
+**send_stats_request** procedure every 5 seconds sends port stats request
+to all switches. **_handle_PortStatsReceived** saves parsed response.
+**log_stats** every minute aggregates statistics prints it. However all
+of this covered in the code.
+
 #### 3. Filtering
 In order to check whether two MAC-addresses belongs to the same tenant,
 TenantMatched object is instantiates and passes to Controller.
@@ -53,7 +61,19 @@ In case when MAC is not presented in .cfg, it has id -1.
 In case when one of given addresses is broadcast (ff:ff:ff:ff:ff:ff) method returns
 True.
 
+#### Suggestions
 
+> To send requests at regular intervals, you will likely need to use python threads or timers.
+
+I can imagine what other students might build using timers, especially
+if they're not familiar with python (There were lots at OpenFlow practice
+lesson). I advocate you to mention Timer, provided by POX developers.
+Usage is simple as follows:
+```python
+# Execute func every 5 seconds
+from pox.lib.recoco import Timer
+Timer(5, func, recurring=True)
+```
 
 ________________________________________________________________________
 <a name="myfootnote1">1</a>. Follow commit history, to track
