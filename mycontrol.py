@@ -32,6 +32,12 @@ class Controller(object):
         # {str(connection.dpid): stats}
         self.statistics = dict()
 
+        # remember the connection dpid for switches
+        self.switches = dict()
+        self.RX_last = dict()  # {'s1-eth2': 42}
+        self.TX_last = dict()
+
+        # timer set to execute every minute
         from pox.lib.recoco import Timer
         # timer set to execute send_stats_request every 5 seconds
         Timer(5, self.send_stats_request, recurring=True)
@@ -47,13 +53,21 @@ class Controller(object):
         Handler for timer function (periodic task) that sends the requests to
         all the switches connected to the controller.
         """
-        for c in core.openflow.connections:
-            c.send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
-        log.debug("Sent %i port stats request(s)",
-                  len(core.openflow.connections))
+        for connection in core.openflow.connections:
+            connection.send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+        log.debug("Sent %i port stats request(s)", len(core.openflow.connections))
 
-    @staticmethod
-    def log_stats():
+    def resolve_hostname(self, iface):  # Hack
+        s = int(iface.split('-')[0][1:])
+        eth = int(iface.split('-')[1][3:])
+        if s < 2:  # NO_OF leaf switches
+            return
+        return 'h%d' % (
+            (s - 2) * 4  # NO_OF leaf switches, NO_OF leaf hosts
+            + eth
+        )
+
+    def log_stats(self):
         """
         Handler for timer function (periodic task) that logs statistics
         about switches and hosts:
@@ -62,8 +76,42 @@ class Controller(object):
               bytes, and the reception and emission bandwidth during
               the last minute.
         """
-        log.info("Statistics about switches and hosts:")
-        # TODO May 20
+        for dpid, switch in self.switches.items():
+            dropped_count = 0
+            for conn in self.statistics[dpid]:
+                dropped_count += conn['tx_dropped'] + conn['rx_dropped']
+            log.info("%s DROP %d" % (switch['name'], dropped_count))
+
+            for conn in self.statistics[dpid]:
+                if conn['port_no'] > 4:  # HACK
+                    continue
+
+                iface_name = switch['ports'][conn['port_no']]
+                host_name = self.resolve_hostname(iface_name)
+                rx, tx = conn['rx_bytes'], conn['tx_bytes']
+                if iface_name not in self.RX_last:
+                    self.RX_last[iface_name] = 0
+                    self.TX_last[iface_name] = 0
+                rx_bw = (rx - self.RX_last[iface_name]) / (1000 * 10.0)
+                tx_bw = (tx - self.TX_last[iface_name]) / (1000 * 10.0)
+                self.RX_last[iface_name] = rx
+                self.TX_last[iface_name] = tx
+
+                if host_name:
+                    log.info("%s: RX_BYTES %s, TX_BYTES %s, RX_BW %.1f kbps, TX_BW %.1f kbps" % (
+                        host_name, rx, tx, rx_bw, tx_bw
+                    ))
+
+    def _handle_ConnectionUp(self, event):
+        for m in event.connection.features.ports:
+            if event.dpid not in self.switches:
+                self.switches[event.connection.dpid] = {
+                    'name': m.name.split('-')[0],
+                    'ports': dict()  # {port_no: 'name'}
+                }
+                self.RX_last[m.name] = 0
+                self.TX_last[m.name] = 0
+            self.switches[event.connection.dpid]['ports'][m.port_no] = m.name
 
     def _handle_PortStatsReceived(self, event):
         """
@@ -73,13 +121,8 @@ class Controller(object):
         # dpid = dpidToStr(event.connection.dpid)
         dpid = event.connection.dpid
         stats = flow_stats_to_list(event.stats)
-        log.debug("PortStatsReceived from %s", dpid)
+        log.debug("PortStatsReceived from %s: %s", dpid, stats)
         self.statistics[dpid] = stats
-        # log.info("s%s DROP %d" % (dpid, stats[-1]['tx_dropped'] + stats[-1]['rx_dropped']))
-        # for stat in stats[:-1]:
-        #     log.info("h%s: RX_BYTES %s, TX_BYTES %s, RX_BW 1.2 kbps, TX_BW 384 kbps" % (
-        #         stat['port_no'], stat['rx_bytes'], stat['tx_bytes']
-        #     ))
 
     def _handle_PacketIn(self, event):
         """
