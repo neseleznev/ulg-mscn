@@ -3,6 +3,7 @@
 """
 This component presents controller for the Task 2 in MSCN ULg course.
 """
+import os
 
 from pox.core import core
 import pox.openflow.libopenflow_01 as of
@@ -17,10 +18,13 @@ class Controller(object):
     Majestic class which presents controller, thanks
     duck-typing and disgusting POX architecture
     """
-    def __init__(self, connection, tenant_matcher):
+    def __init__(self, connection, tenant_matcher, depth=1, fanout=2, hosts=4):
         # Keep track of the connection to the switch
         self.connection = connection
         self.tenant_matcher = tenant_matcher
+        self.switches_count = sum(int(fanout) ** i for i in range(int(depth)))
+        self.leaf_switches_count = int(fanout) ** (int(depth) - 1)
+        self.leaf_hosts_count = int(hosts)
 
         # This binds listeners _handle_EventType to EventType
         connection.addListeners(self)
@@ -45,7 +49,7 @@ class Controller(object):
         # timer set to execute send_stats_request
         Timer(self.stats_request_timeout, self.send_stats_request, recurring=True)
         # timer set to execute log_stats
-        Timer(self.stats_request_timeout, self.log_stats, recurring=True)
+        Timer(self.log_stats_timeout, self.log_stats, recurring=True)
 
         # send first request as soon as possible
         self.send_stats_request()
@@ -63,10 +67,11 @@ class Controller(object):
     def resolve_hostname(self, iface):  # Hack
         s = int(iface.split('-')[0][1:])
         eth = int(iface.split('-')[1][3:])
-        if s < 2:  # NO_OF leaf switches
+        if s <= self.switches_count - self.leaf_switches_count:
             return
         return 'h%d' % (
-            (s - 2) * 4  # NO_OF leaf switches, NO_OF leaf hosts
+            (s - (self.switches_count - self.leaf_switches_count) - 1)
+            * self.leaf_hosts_count
             + eth
         )
 
@@ -86,7 +91,7 @@ class Controller(object):
             log.info("%s DROP %d" % (switch['name'], dropped_count))
 
             for conn in self.statistics[dpid]:
-                if conn['port_no'] > 4:  # HACK
+                if conn['port_no'] > self.leaf_hosts_count:
                     continue
 
                 iface_name = switch['ports'][conn['port_no']]
@@ -235,5 +240,9 @@ def launch():
 
     def handle_connection_up(event):
         log.debug("Controlling %s" % (event.connection,))
-        Controller(event.connection, tenant_matcher)
+        Controller(event.connection, tenant_matcher,
+                   depth=os.environ.get('DEPTH'),
+                   fanout=os.environ.get('FANOUT'),
+                   hosts=os.environ.get('HOSTS')
+        )
     core.openflow.addListenerByName("ConnectionUp", handle_connection_up)

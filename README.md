@@ -48,6 +48,14 @@ to all switches. **_handle_PortStatsReceived** saves parsed response.
 **log_stats** every minute aggregates statistics prints it. However all
 of this covered in the code.
 
+Unfortunately, we're not able to resolve host names or get tree topology
+inside Controller lifecycle, so implementation hardly depends on
+environment variables:
+* DEPTH
+* FANOUT
+* HOSTS
+They have the same meaning like in previous part.
+
 #### 3. Filtering
 In order to check whether two MAC-addresses belongs to the same tenant,
 TenantMatched object is instantiates and passes to Controller.
