@@ -39,10 +39,13 @@ class Controller(object):
 
         # timer set to execute every minute
         from pox.lib.recoco import Timer
-        # timer set to execute send_stats_request every 5 seconds
-        Timer(5, self.send_stats_request, recurring=True)
-        # timer set to execute log_stats every minute
-        Timer(60, self.log_stats, recurring=True)
+        self.stats_request_timeout = 5  # every 5 seconds
+        self.log_stats_timeout = 60  # every minute
+
+        # timer set to execute send_stats_request
+        Timer(self.stats_request_timeout, self.send_stats_request, recurring=True)
+        # timer set to execute log_stats
+        Timer(self.stats_request_timeout, self.log_stats, recurring=True)
 
         # send first request as soon as possible
         self.send_stats_request()
@@ -92,8 +95,8 @@ class Controller(object):
                 if iface_name not in self.RX_last:
                     self.RX_last[iface_name] = 0
                     self.TX_last[iface_name] = 0
-                rx_bw = (rx - self.RX_last[iface_name]) / (1000 * 10.0)
-                tx_bw = (tx - self.TX_last[iface_name]) / (1000 * 10.0)
+                rx_bw = (rx - self.RX_last[iface_name]) / (1000 * float(self.log_stats_timeout))
+                tx_bw = (tx - self.TX_last[iface_name]) / (1000 * float(self.log_stats_timeout))
                 self.RX_last[iface_name] = rx
                 self.TX_last[iface_name] = tx
 
